@@ -289,8 +289,48 @@ class User(AbstractUser):
 
 ### 추천 알고리즘
 
-TMDB API에서 제공하는 영화 데이터 중, overview 필드에서 한국어 자연어 처리 모듈(konlpy)을 통해 명사를 추출한다. (nouns 필드)
-이 명사를 기반으로 각 영화의 줄거리와 코사인유사도를 측정한 뒤, 좋아하는 영화를 기준으로 정렬하여 가장 적절한 상위 8개 영화를 추천하도록 구현하였다.
+#### 전체적인 구현
+
+- Data의 Field값 중 하나인 `Overview`에서 '명사'만을 추출하여(자연어 모듈 사용) 새로운 Field인 `'nouns'`로 구성한다. 이 후,  각 Record(movie)들의 nouns를 기반으로 Cosine Similarity (scikit-learn 제공)를 구한 뒤, Descending sorting하여 상위 8개의 영화를 도출한다. 
+- 즉, Input으로 제공된 영화의 줄거리와 가장 유사한 영화를 데이터베이스에서 찾아 Output으로 제공 하고자 한다.
+
+#### 데이터 추출 및 구성(초기DB 설정)
+
+ 1. `TMDB`라는 영화정보 제공 사이트에서 open API를 이용하여 JSON 형태로 추출
+
+    > 데이터는 TMDB에서 평점을 매긴 사용자의 수가 3500 이상인 영화들로 구성하였다.
+
+ 2. 데이터의 Contents에는 필요하지 않는 정보가 있기에, 필요한 데이터 Feature만으로 구성된 새로운 JSON 파일 구성
+
+    > 제공된 정보 (Fields는 movie ID / movie Name / movie Release_Date / movie Poster_URLS / movie Genre / movie Overview)와 데이터 처리를 이용한 nouns필드를 이용해 JSON 형식으로 제작
+    
+3. 필요 데이터로 구성된 JSON을 저장하여, 사전에 Django DataBase에 구성 (sqlite3)
+
+    > python에서 제공하는 sqlite3 module을 이용하여 import 시킨 뒤 시행하였다.
+
+#### 데이터 처리
+
+ 1. Database에 저장하기 전, 영화의 줄거리를 기반으로 명사를 구해내야 하기에 한국어 자연어 처리 모듈인 `konlpy`를 이용하였다. 그리고 줄거리의 명사를 새로운 데이터 필드에 추가하여 Database를 구성하였다.
+
+    > 영화가 관리자에 의해 새로 생성될 때에도 nouns 필드의 값을 제작하여 DB에 입력된다.
+
+2. Database의 Value 값을 이용하기 위하여 DataFrame (pandas 제공)로 구성하는 과정을 가졌다.
+
+     > sqlite3 모듈을 이용하여 필요한 필드의 값들을 Fetch 시켜, pandas에서 제공하는 DataFrame으로 구성하였다. 이를 통해 Vectorize (string의 vector화)시키고, 유사도를 측정할 수 있다.
+
+#### 유사도 구현
+
+1. DataFrame으로 구성된 영화 Records들의 nouns값들은 현재, String형태로 되어있기에 유사도 측정하기 위한 과정을 거쳤다. 먼저 scikit-learn에서 제공하는 CountVectorize 모듈을 이용하여 모든 nouns의 인자들을 BOW(Bag Of Words)로 구성한다.
+
+	> 이 과정 또한 시간이 걸리기에, 서버가 첫 시작 혹은 Home으로 접근 할 때만 동작하여 BOW를 구성하도록 했다
+
+2. 구현한 BOW값들의 Cosine_Similarity(scikit-learn)를 구하여 새로운 변수로 저장한다.
+
+	> 동시에 내림차순으로 Sorting하여 가장 유사도가 높은 순으로 구성한다.
+
+3. Input으로 들어온 영화 ID를 기반으로 DataFrame에서 Index를 찾으며, 이 Index를 이용해 코사인 유사도가 가장 높은 상위 8개의 영화를 Output으로 Return 한다.
+
+	> Poster URL과 movie_name을 JSON 형태로 return함으로서, Front-end part에서 바로 이미지와 영화정보를 시각화 할 수 있게 한다.
 
 #### Django
 
@@ -301,7 +341,8 @@ TMDB API에서 제공하는 영화 데이터 중, overview 필드에서 한국�
 
 #### Vue
 
-	1. Home에 접속할 때마다 기본페이지에 요청을 보내 DataFrame을 생성을 시도함
+1. Home에 접속할 때마다 기본페이지에 요청을 보내 DataFrame을 생성을 시도함
+
  	2. DataFrame이 생성되어있다면 더 이상 생성하지 않음
 
 ### Design
@@ -362,10 +403,12 @@ SERVER_URL을 Heroku에 배포한 주소로 설정해줌
 1. 초기 DB를 구성하는 것이 어려웠다. TMDB에서 받은 자료를 가공하는 과정이 생각보다 오래 걸렸다.
 2. 알고리즘을 pycharm으로 실행했을 때 실행이 되지만 Django의 views.py로 넘어와 형식에 맞게 변환하고 실행되게 만드는 것이 어려웠다. (예: views.py의 전역변수는 어떻게 인식되는가)
 3. Vue 라이프싸이클이 정확하게 언제 적용되는지 알기 힘들다.
+4. 자연어 처리 모듈 중 NLTK(natural language toolkit)이라는 유명한 모듈이 있지만, 영문을 기반으로 처리하기에 한국어를 처리하기어려웠고, konlpy라는 한국어 자연어 처리 모듈을 찾아 프로젝트를 수행하였다.
+5. konlpy의 문제는 속도가 느리며, JVM(Java Virtual Machine)을 사용하기에 환경을 구성하여 Views.py에 적용하기 힘들었다. 따라서 초기 DB에 대하여 데이터 필드를 JSON 형식으로 구성하여 입력하는 하는 결정을 하였다.
 
 ## 아쉬웠던 점 or 추가하고 싶은 기능
 
-1. 다 구현해보고 싶었지만 구현못한 기능(시간부족)이 생각보다 많다.
+1. 다 구현해보고 싶었지만 구현못한 기능(주로 시간부족)이 생각보다 많다.
    * Article 수정
    * 댓글 수정
    * Article 좋아요
